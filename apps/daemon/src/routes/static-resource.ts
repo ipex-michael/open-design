@@ -455,7 +455,9 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
 
     if (!wantsStream) {
       try {
-        const list = await detectAgents(agentCliEnv);
+        // Fork policy (local-first BYOK): OpenDesign Cloud sign-in is removed,
+        // so the `amr` agent is hidden from every agent-listing surface.
+        const list = (await detectAgents(agentCliEnv)).filter((agent) => agent.id !== 'amr');
         res.json({ agents: list });
       } catch (err: any) {
         res.status(500).json({ error: String(err) });
@@ -480,6 +482,7 @@ export function registerStaticResourceRoutes(app: Express, ctx: RegisterStaticRe
     try {
       for await (const agent of detectAgentsStream(agentCliEnv)) {
         if (aborted) break;
+        if (agent.id === 'amr') continue;
         res.write(`event: agent\ndata: ${JSON.stringify(agent)}\n\n`);
       }
       if (!aborted) {

@@ -52,10 +52,6 @@ describe('server route inventory', () => {
       'GET /api/amr/models',
       'GET /api/integrations/vela/status',
       'ALL /api/integrations/vela/api-proxy/*splat',
-      'POST /api/integrations/vela/login',
-      'POST /api/integrations/vela/login/cancel',
-      'POST /api/integrations/vela/analytics-entry',
-      'POST /api/integrations/vela/logout',
     ];
     const genuiRouteKeys = [
       'GET /api/runs/:runId/genui',

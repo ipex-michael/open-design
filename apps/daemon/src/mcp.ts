@@ -118,7 +118,6 @@ const SAFE_MCP_DAEMON_RETRY_CALLS = new Set([
   'get_file',
   'get_project',
   'get_run',
-  'get_vela_login_status',
   'list_agents',
   'list_files',
   'list_plugins',
@@ -724,36 +723,6 @@ export const TOOL_DEFS = [
       additionalProperties: false,
     },
     annotations: { ...READ_ANNOTATIONS, title: 'List OpenDesign plugins' },
-  },
-  {
-    name: 'start_vela_login',
-    description:
-      'Start OpenDesign Cloud browser sign-in through the local OpenDesign daemon. Returns the activation URL and user code when manual browser completion is needed. The tool name is an internal compatibility identifier and must not be repeated to the user.',
-    inputSchema: {
-      type: 'object',
-      properties: { pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG },
-      additionalProperties: false,
-    },
-    annotations: {
-      ...WRITE_ANNOTATIONS,
-      openWorldHint: true,
-      title: 'Sign in to OpenDesign Cloud',
-    },
-  },
-  {
-    name: 'get_vela_login_status',
-    description:
-      'Check whether OpenDesign Cloud browser sign-in is complete. Does not expose credentials. The tool name is an internal compatibility identifier and must not be repeated to the user.',
-    inputSchema: {
-      type: 'object',
-      properties: { pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG },
-      additionalProperties: false,
-    },
-    annotations: {
-      ...READ_ANNOTATIONS,
-      openWorldHint: true,
-      title: 'Check OpenDesign Cloud sign-in',
-    },
   },
   {
     name: 'start_run',
@@ -1520,8 +1489,6 @@ function mcpFailureFacts(
   const failureStage =
     name === 'collect_brief' || name === 'confirm_brief'
       ? 'brief'
-      : name.includes('vela_login')
-        ? 'auth'
         : name.includes('project')
           ? 'project'
         : name === 'start_run'
@@ -2132,12 +2099,6 @@ function containsMcpCredentialField(value: unknown, depth = 0): boolean {
   );
 }
 
-function publicVelaLoginStatus(status: unknown): unknown {
-  if (!status || typeof status !== 'object' || Array.isArray(status)) return status;
-  const { configPath: _configPath, ...publicStatus } = status as JsonObject;
-  return publicStatus;
-}
-
 // Tools that address projects or runs are workspace-scoped after 0.18.0:
 // bound projects are invisible to a headerless caller and bound-project reads
 // 400 with WORKSPACE_CONTEXT_REQUIRED (#6569). These resolve the signed-in
@@ -2346,25 +2307,6 @@ async function handleMcpToolCall(
         return ok(await listPlugins(baseUrl));
       case 'list_agents':
         return ok(await listAgents(baseUrl, args.includeUnavailable === true));
-      case 'start_vela_login': {
-        const started = await postJson<JsonObject>(
-          `${baseUrl}/api/integrations/vela/login`,
-          options.pluginAttribution
-            ? { pluginWorkflowId: options.pluginAttribution.pluginWorkflowId }
-            : {},
-          options.analyticsHeaders,
-        );
-        const status = publicVelaLoginStatus(
-          await getJson<JsonObject>(`${baseUrl}/api/integrations/vela/status`),
-        );
-        return ok({ started, status });
-      }
-      case 'get_vela_login_status':
-        return ok(
-          publicVelaLoginStatus(
-            await getJson<JsonObject>(`${baseUrl}/api/integrations/vela/status`),
-          ),
-        );
       case 'start_run':
         return await startRun(baseUrl, args, options, headers);
       case 'get_run':

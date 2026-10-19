@@ -737,8 +737,6 @@ export function EntryShell({
     accountFooterNotice = <RailAccountSyncTip />;
   } else if (accountFooterState === 'recovering') {
     accountFooterNotice = <RailAccountRecoveryTip />;
-  } else if (accountFooterState === 'sign-in') {
-    accountFooterNotice = <CloudSignInTip />;
   }
   const workspaceContextRef = useRef(workspaceContext);
   workspaceContextRef.current = workspaceContext;
@@ -3709,76 +3707,6 @@ function OnboardingView({
           <div className="onboarding-cloud__center">
             <h1 className="onboarding-cloud__title">{t('settings.onboardingCloudTitle')}</h1>
             <p className="onboarding-cloud__body">{t('settings.onboardingCloudBody')}</p>
-            <div className={onboardingWelcomeStyles.signInAction}>
-              {!amrSignedIn && !amrStatusResolving && !cloudBusy ? (
-                <span className={onboardingWelcomeStyles.creditCorner}>
-                  <span
-                    className={`${onboardingWelcomeStyles.credits} od-tooltip`}
-                    data-tooltip={t('settings.onboardingFreeCreditsHint')}
-                    aria-label={t('settings.onboardingFreeCreditsHint')}
-                    tabIndex={0}
-                  >
-                    <span className={onboardingWelcomeStyles.creditLabel}>
-                      {t('settings.onboardingFreeCredits')}
-                    </span>
-                  </span>
-                </span>
-              ) : null}
-              <button
-                type="button"
-                className="onboarding-cloud__primary"
-                onClick={() => {
-                  if (amrStatusResolving) return;
-                  if (amrSignedIn) {
-                    recordAmrEntry(analytics.track, 'onboarding_amr_card', new Date(), {
-                      metricsConsent: config.telemetry?.metrics === true,
-                    });
-                    recordAmrEntry(
-                      analytics.track,
-                      'onboarding_amr_sign_in_continue',
-                      new Date(),
-                      {
-                        metricsConsent: config.telemetry?.metrics === true,
-                        reuseExistingFrom: ['onboarding_amr_card'],
-                      },
-                    );
-                    continueAfterCloudSignIn();
-                    return;
-                  }
-                  void handleCloudSignIn();
-                }}
-                disabled={cloudBusy || amrLoginCancelPending || amrStatusResolving}
-                aria-busy={cloudBusy || amrStatusResolving ? true : undefined}
-              >
-                <Icon name="log-in" size={17} />
-                <span>
-                  {cloudBusy
-                    ? t('settings.amrSigningIn')
-                    : amrStatusResolving
-                      ? t('common.loading')
-                      : amrSignedIn
-                        ? t('settings.onboardingCloudContinue')
-                        : t('settings.onboardingCloudSignIn')}
-                </span>
-              </button>
-            </div>
-            {amrLoginError ? (
-              <span className="onboarding-cloud__error" role="alert">
-                {amrLoginError}
-              </span>
-            ) : null}
-            {/* Everything under the primary button shares one grid cell, so
-                the cell is always as tall as its tallest state and switching
-                between "own AI" choices and the pending sign-in controls never
-                moves the button. The idle layer stays mounted (hidden) while
-                signing in to keep reserving that height. */}
-            <div className={onboardingWelcomeStyles.belowAction}>
-              <div
-                className={`${onboardingWelcomeStyles.belowLayer} ${
-                  cloudBusy ? onboardingWelcomeStyles.belowLayerHidden : ''
-                }`}
-                aria-hidden={cloudBusy ? true : undefined}
-              >
                 <div className={onboardingWelcomeStyles.alternatives}>
                   <div className={onboardingWelcomeStyles.divider}>
                     {t('settings.onboardingOwnAi')}
@@ -3814,47 +3742,7 @@ function OnboardingView({
                   </div>
                 </div>
               </div>
-              {cloudBusy ? (
-                <div className={onboardingWelcomeStyles.belowLayer}>
-                  {/* Manual device-auth fallback, mirroring Settings' AmrLoginPill:
-                      vela auto-opens the browser, but when that fails silently (e.g.
-                      corp-managed hosts) the pending login otherwise looks like a
-                      dead button — surface the activation link the status poll
-                      already carries. */}
-                  {amrStatus?.activationUrl
-                  && (activationHintDue || amrStatus.browserOpenFailed) ? (
-                    <p className="onboarding-cloud__activation" role="status">
-                      <span>
-                        {amrStatus.browserOpenFailed
-                          ? <AmrActivationHintText browserOpenFailed />
-                          : t('settings.onboardingActivationPrompt')}
-                      </span>
-                      <a
-                        className="onboarding-cloud__activation-link"
-                        href={amrStatus.activationUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {amrStatus.browserOpenFailed
-                          ? t('settings.amrActivationOpen')
-                          : t('settings.onboardingActivationReopen')}
-                        <Icon name="external-link" size={12} />
-                      </a>
-                    </p>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="onboarding-cloud__cancel"
-                    onClick={handleCancelAmrLogin}
-                    disabled={amrLoginCancelPending}
-                  >
-                    {t('settings.amrCancelSignIn')}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-          <footer className="onboarding-cloud__footer">
+<footer className="onboarding-cloud__footer">
             <LanguageMenu placement="up" align="start" />
             <span>
               © {new Date().getFullYear()} OpenDesign · {t('settings.onboardingCloudRights')}
