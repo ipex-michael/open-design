@@ -1,0 +1,51 @@
+name: fork-mac-arm-build
+
+# Fork-only convenience (local-first BYOK fork): builds an unsigned macOS
+# arm64 .dmg on demand and publishes it as a workflow artifact, so the
+# package can be obtained without an Apple Silicon dev machine. The
+# tools-pack mac build is host-native, which is why it must run on the
+# Apple Silicon macos-15 fleet. No signing or notarization: the fork has
+# no Apple certificate, so the first launch needs the Gatekeeper override
+# (right-click > Open).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-mac-arm-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac-arm-dmg:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10.33.2
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile
+
+      - name: Build unsigned macOS arm64 dmg
+        run: pnpm tools-pack mac build --to dmg --dir pack-dist
+
+      - name: Upload dmg artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: open-design-mac-arm-dmg
+          path: pack-dist/out/mac/**/dmg/*.dmg
+          if-no-files-found: error
