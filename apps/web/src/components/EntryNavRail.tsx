@@ -108,8 +108,6 @@ import {
   amrPlansUrlForProfile,
 } from '../runtime/amr-guidance';
 import { useWorkspaceInvalidation } from '../collab/workspace-events';
-import { resolveDeepSeekV4FlashCampaignAudience } from '../campaigns/deepseek-v4-flash';
-import { useDeepSeekV4FlashCampaignVisibility } from '../campaigns/use-deepseek-v4-flash-campaign';
 import type { EntryHomeView } from '../router';
 import type {
   AccountMenuClickProps,
@@ -129,7 +127,6 @@ import {
   stableAnalyticsErrorCode,
   workspaceAnalyticsDimensions,
 } from '../analytics/workspace';
-import { WorkbenchCampaignBadge } from './WorkbenchCampaignBadge';
 import { workspaceChromeAccountActionsHost } from './workspaceChromeActions';
 
 /** Gap the account menu keeps from the rail card's top edge — the same inset
@@ -1930,24 +1927,6 @@ export function WorkspaceTopRightAccountCluster({
   // ACCOUNT read (`workspaceId: null` by contract). Same rule as EntryShell.
   const billing = workspaceBillingSummaryForContext(billingResponse, context);
   const balanceUsd = workspaceBillingBalanceUsd(billingResponse, context);
-  const deepSeekCampaignVisibility = useDeepSeekV4FlashCampaignVisibility();
-  const campaignPlan = resolvePlanLabelTier({
-    billing,
-    context,
-    accountPlan:
-      contextLoading || context?.workspaceType === 'team'
-        ? null
-        : amrAccountPlan,
-  });
-  const deepSeekCampaignAudience = resolveDeepSeekV4FlashCampaignAudience({
-    plan: campaignPlan,
-    loggedIn: amrLoggedIn,
-    now: deepSeekCampaignVisibility.now,
-  });
-  const campaignAudience =
-    deepSeekCampaignAudience === 'unknown'
-      ? null
-      : deepSeekCampaignAudience;
   return (
     <EntryTopRightCluster
       page="project"
@@ -1955,18 +1934,8 @@ export function WorkspaceTopRightAccountCluster({
       billing={billing}
       billingResponse={billingResponse}
       balanceUsd={balanceUsd}
-      // No CMS touchpoint here: every placement the app authorizes is a home
-      // placement (`opend.home.*`), and a project workbench is not home. The
-      // built-in campaign pill is product chrome, not a CMS host, and stays.
-      leadingSlot={campaignAudience ? (
-        <WorkbenchCampaignBadge
-          audience={campaignAudience}
-          page="project"
-          metricsConsent={metricsConsent}
-          installationId={installationId}
-          loggedIn={amrLoggedIn}
-        />
-      ) : null}
+      // Fork policy (local-first BYOK): the campaign pill (a subscription
+      // promo shown even while signed out) is removed.
       updaterSlot={updaterSlot}
       onOpenSettings={onOpenSettings}
       onSignedOut={onSignedOut}
@@ -2138,13 +2107,10 @@ export function EntryNavRail({
   const canAccessInviteFlow = canAccessWorkspaceInviteFlow(context);
   const workspaceSettingsUrl = context?.workspaceSettingsUrl?.trim() || null;
 
-  // Message-center panel for the SIGNED-OUT shell only (the bell on the local
-  // account dock in the footer is the one opener there). The signed-in panel —
-  // plus the unread badge on its dock bell — lives inside
-  // `EntryTopRightCluster` with the account menu.
-  const [messageCenterOpen, setMessageCenterOpen] = useState(false);
-  const [messageUnreadCount, setMessageUnreadCount] = useState(0);
-  const messageCenterRailRef = useRef<HTMLButtonElement | null>(null);
+  // Fork policy (local-first BYOK): the signed-out message-center bell and its
+  // announcement panel are removed — the feed is an OpenDesign-service
+  // subscription/announcement channel. The signed-in panel inside
+  // `EntryTopRightCluster` stays but is unreachable without a sign-in path.
   const [teamOpen, setTeamOpen] = useState(false);
   useEffect(() => {
     if (!teamOpen) return;
@@ -2749,15 +2715,10 @@ export function EntryNavRail({
       ) : (
         <div className="entry-nav-rail__footer">
           {footerNotice}
-          {/* Local account dock (OPEND-3140): the signed-out twin of the dock
-              `EntryTopRightCluster` portals into the rail foot when signed in
-              — social links above an identity row whose trailing slot is the
-              message-centre bell. The identity here is the local mode itself
-              (there is no account to name), and opening it lands in Settings,
-              where the local CLI / BYOK configuration lives. It sits UNDER the
-              sign-in card so the identity row stays the rail's last line on
-              both branches, and the card keeps its own slot as the one
-              sign-in entry. */}
+          {/* Local account dock: social links above an identity row for the
+              local mode itself (there is no account to name), and opening it
+              lands in Settings, where the local CLI / BYOK configuration
+              lives. */}
           <div
             className="entry-nav-rail__account-dock entry-nav-rail__account-dock--local"
             data-testid="entry-nav-local-account-dock"
@@ -2787,54 +2748,11 @@ export function EntryNavRail({
                 </span>
                 <span className="entry-nav-rail__account-name">{t('entry.localAccountName')}</span>
               </button>
-              <button
-                type="button"
-                ref={messageCenterRailRef}
-                className="entry-nav-rail__account-bell"
-                aria-haspopup="dialog"
-                aria-expanded={messageCenterOpen}
-                aria-label={t('messageCenter.title')}
-                title={t('messageCenter.title')}
-                data-testid="entry-nav-message-center"
-                onClick={() => {
-                  trackAccountMenuClick(analytics.track, {
-                    page_name: analyticsPage,
-                    area: 'account_menu',
-                    element: 'message_center',
-                  });
-                  setMessageCenterOpen(true);
-                }}
-              >
-                <Icon name="bell" size={15} />
-                {messageUnreadCount > 0 ? (
-                  <span className="entry-nav-rail__menu-item-dot" aria-hidden />
-                ) : null}
-              </button>
             </div>
           </div>
         </div>
       )}
       </div>
-
-      {/* Signed-out message-center panel + unread polling (the local dock's
-          bell above is its opener). Signed-in mounts move into
-          `EntryTopRightCluster` — context-gating both sides is what keeps
-          exactly one panel (and one unread poller) alive. */}
-      {context ? null : (
-        <MessageCenter
-          hideTrigger
-          returnFocusRef={messageCenterRailRef}
-          open={messageCenterOpen}
-          onOpenChange={setMessageCenterOpen}
-          onUnreadCountChange={setMessageUnreadCount}
-          onOpenNotificationSettings={onOpenSettings ? () => onOpenSettings('notifications') : undefined}
-          priorityAnnouncementActive={priorityAnnouncementActive}
-          onPriorityAnnouncementPendingChange={onPriorityAnnouncementPendingChange}
-          priorityAnnouncementCurrentPlanId={priorityAnnouncementCurrentPlanId}
-          priorityAnnouncementAmrProfile={priorityAnnouncementAmrProfile}
-          priorityAnnouncementMetricsConsent={priorityAnnouncementMetricsConsent}
-        />
-      )}
 
       <InviteDialog
         open={inviteOpen}

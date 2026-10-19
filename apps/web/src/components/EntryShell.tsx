@@ -99,7 +99,6 @@ import {
   ProjectSearchModal,
 } from './ProjectSearchModal';
 import {
-  CloudSignInTip,
   RailAccountRecoveryTip,
   RailAccountSyncTip,
 } from './CloudSignInTip';
@@ -166,11 +165,6 @@ import {
 } from '../collab/useWorkspaceContext';
 import { useWorkspaceInvalidation } from '../collab/workspace-events';
 import { resolvePlanLabelTier } from '../collab/team-plan';
-import { resolveDeepSeekV4FlashCampaignAudience } from '../campaigns/deepseek-v4-flash';
-import { useDeepSeekV4FlashCampaignVisibility } from '../campaigns/use-deepseek-v4-flash-campaign';
-import { WorkbenchCampaignBadge } from './WorkbenchCampaignBadge';
-import { canRenderProductionCampaignBadge, ProductionCampaignBadge } from './ProductionCampaignBadge';
-import { ProductionCampaignHover } from './ProductionCampaignHover';
 import {
   beginWorkspaceScopedRead,
   workspaceIdentityCacheKey,
@@ -794,7 +788,6 @@ export function EntryShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [homeFundingIdentity, workspaceBillingResponse]);
   const [goPlanSunsetMessagePending, setGoPlanSunsetMessagePending] = useState(false);
-  const deepSeekCampaignVisibility = useDeepSeekV4FlashCampaignVisibility();
   // Same personal-vs-team accountPlan rule as App's `resolvedAmrPlan`.
   const deepSeekCampaignPlan = resolvePlanLabelTier({
     billing: workspaceBilling,
@@ -804,25 +797,10 @@ export function EntryShell({
         ? null
         : amrAccountPlan?.trim() || null,
   });
-  const resolvedDeepSeekV4FlashCampaignAudience = resolveDeepSeekV4FlashCampaignAudience({
-    // Subscription is the only campaign segmentation axis. In particular,
-    // `resolvePlanLabelTier` turns the backend-confirmed unsubscribed state into
-    // `free`; wallet balance / historical recharge never upgrades this audience.
-    plan: deepSeekCampaignPlan,
-    loggedIn: amrLoggedIn,
-    now: deepSeekCampaignVisibility.now,
-  });
-  const deepSeekV4FlashCampaignAudience = goPlanSunsetMessagePending
-    ? 'unknown'
-    : resolvedDeepSeekV4FlashCampaignAudience;
-  const topRightCampaignAudience =
-    deepSeekV4FlashCampaignAudience === 'unknown'
-      ? null
-      : deepSeekV4FlashCampaignAudience;
-  // The CMS touchpoints this rail hosts are home placements (`opend.home.*`).
-  // The rail itself rides every entry view, so the home view — not the rail —
-  // is what decides whether they may be on screen.
-  const homeCampaignHostsVisible = view === 'home';
+  // Fork policy (local-first BYOK): there is no OpenDesign account or
+  // subscription, so the campaign audience stays 'unknown' — the campaign
+  // badge and the upgrade modal never render for anyone.
+  const deepSeekV4FlashCampaignAudience = 'unknown' as const;
   const workspaceBalanceUsd = workspaceBillingBalanceUsd(
     workspaceBillingResponse,
     workspaceContext,
@@ -1898,29 +1876,6 @@ export function EntryShell({
           }}
           onOpenSearch={() => setProjectSearchOpen(true)}
           open={railOpen}
-          topRightSlot={topRightCampaignAudience || (homeCampaignHostsVisible && amrLoggedIn === true) ? (
-            <>
-              {topRightCampaignAudience ? (
-                <WorkbenchCampaignBadge
-                  audience={topRightCampaignAudience}
-                  page="home"
-                  metricsConsent={config.telemetry?.metrics === true}
-                  installationId={config.installationId}
-                  loggedIn={amrLoggedIn}
-                />
-              ) : null}
-              {homeCampaignHostsVisible
-                && canRenderProductionCampaignBadge(amrLoggedIn === true, amrAccountId) ? <ProductionCampaignBadge authenticated sessionSubject={amrAccountId} /> : null}
-              {/* The requirements-specific hover entry is its own authorized
-                  touchpoint, beside—not renamed from—the account badge. */}
-              {homeCampaignHostsVisible ? (
-                <ProductionCampaignHover
-                  authenticated={amrLoggedIn === true}
-                  sessionSubject={amrAccountId}
-                />
-              ) : null}
-            </>
-          ) : null}
           context={railWorkspaceContext}
           billing={workspaceBilling}
           billingResponse={workspaceBillingResponse}
