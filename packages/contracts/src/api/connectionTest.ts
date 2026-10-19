@@ -164,9 +164,14 @@ export interface ValidateBaseUrlOptions {
   forbidLoopback?: boolean;
 }
 
+// Fork policy: local-first BYOK. Any http/https host a user configures is
+// allowed, including localhost, LAN, and other private addresses, so local
+// model servers (Ollama, vLLM, LM Studio, …) can live anywhere on the network.
+// The upstream default-deny internal-IP guard (issue #3225) is removed; keep
+// the scheme check and the allowlist helpers for their other consumers.
 export function validateBaseUrl(
   baseUrl: string,
-  options: ValidateBaseUrlOptions = {},
+  _options: ValidateBaseUrlOptions = {},
 ): BaseUrlValidationResult {
   let parsed: ParsedBaseUrl;
   try {
@@ -176,20 +181,6 @@ export function validateBaseUrl(
   }
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     return { error: 'Only http/https allowed' };
-  }
-  const hostname = parsed.hostname.toLowerCase();
-  // When forbidLoopback is set (asset download URLs), reject loopback
-  // hosts entirely — they should never be reachable from an
-  // attacker-controllable response field (issue #5478).
-  if (options.forbidLoopback && isLoopbackApiHost(hostname)) {
-    return { error: 'Loopback addresses blocked for asset URLs', forbidden: true };
-  }
-  if (
-    !isLoopbackApiHost(hostname) &&
-    !isAllowlistedInternalHost(hostname, options.allowedInternalHosts) &&
-    isBlockedExternalApiHostname(hostname)
-  ) {
-    return { error: 'Internal IPs blocked', forbidden: true };
   }
   return { parsed };
 }

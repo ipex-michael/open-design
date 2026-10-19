@@ -480,8 +480,12 @@ describe('API proxy routes', () => {
     );
   });
 
-  it('blocks private network API base URLs before proxying', async () => {
-    const fetchMock = vi.fn();
+  it('proxies private network API base URLs (fork policy: self-hosted LAN models)', async () => {
+    const fetchMock = vi.fn((input: FetchInput, init?: FetchInit) => {
+      const url = String(input);
+      if (url.startsWith(baseUrl)) return realFetch(input, init);
+      return Promise.resolve(sseResponse('data: [DONE]\n\n'));
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const res = await realFetch(`${baseUrl}/api/proxy/openai/stream`, {
@@ -495,9 +499,9 @@ describe('API proxy routes', () => {
       }),
     });
 
-    expect(res.status).toBe(403);
-    await expect(res.text()).resolves.toContain('Internal IPs blocked');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    await expect(res.text()).resolves.toContain('event: end');
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('192.168.1.50');
   });
 
   it.each([
@@ -509,8 +513,12 @@ describe('API proxy routes', () => {
     'http://[::ffff:192.168.1.50]:11434/v1',
     'http://[fd00::1]:11434/v1',
     'http://[fe80::1]:11434/v1',
-  ])('blocks local and private API base URL form %s before proxying', async (privateBaseUrl) => {
-    const fetchMock = vi.fn();
+  ])('proxies local and private API base URL form %s (fork policy)', async (privateBaseUrl) => {
+    const fetchMock = vi.fn((input: FetchInput, init?: FetchInit) => {
+      const url = String(input);
+      if (url.startsWith(baseUrl)) return realFetch(input, init);
+      return Promise.resolve(sseResponse('data: [DONE]\n\n'));
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const res = await realFetch(`${baseUrl}/api/proxy/openai/stream`, {
@@ -524,9 +532,9 @@ describe('API proxy routes', () => {
       }),
     });
 
-    expect(res.status).toBe(403);
-    await expect(res.text()).resolves.toContain('Internal IPs blocked');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    await expect(res.text()).resolves.toContain('event: end');
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it('surfaces OpenAI-compatible in-stream error frames', async () => {

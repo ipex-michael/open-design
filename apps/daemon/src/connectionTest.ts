@@ -66,8 +66,6 @@ import type { RuntimeAgentDef } from './runtimes/types.js';
 import { preparePromptFileForAgent, type PreparedPromptFile } from './runtimes/prompt-file.js';
 import { configuredAllowedInternalHosts } from './origin-validation.js';
 import {
-  isAllowlistedInternalHost,
-  isBlockedExternalApiHostname,
   isLoopbackApiHost,
   validateBaseUrl,
   type AgentTestRequest,
@@ -144,14 +142,11 @@ export async function validateBaseUrlResolved(
   if (sync.error || !sync.parsed) return sync;
 
   const hostname = sync.parsed.hostname.toLowerCase();
-  // When forbidLoopback is set, do NOT short-circuit on loopback — let it
-  // fall through to the block check (issue #5478).
-  if (!options.forbidLoopback && isLoopbackApiHost(hostname)) return sync;
-  // Issue #3225 — an operator who trusts this hostname has opted it out of the
-  // guard entirely, so skip the resolved-IP block even though it points into
-  // private space. The sync check above already honored a literal-IP allowlist
-  // entry; this covers the hostname-that-resolves-private case.
-  if (isAllowlistedInternalHost(hostname, options.allowedInternalHosts)) return sync;
+  // Fork policy (local-first BYOK): loopback and private/LAN hosts are valid
+  // user-configured provider endpoints, so short-circuit loopback literals and
+  // skip the resolved-address block entirely. DNS resolution below is kept
+  // only to pin the fetch against rebinding.
+  if (isLoopbackApiHost(hostname)) return sync;
   if (looksLikeIpLiteral(hostname)) return sync;
 
   let addresses: DnsLookupAddress[];
@@ -167,29 +162,6 @@ export async function validateBaseUrlResolved(
       return { error: 'DNS resolution failed for asset URL', forbidden: true };
     }
     return sync;
-  }
-
-  for (const addr of addresses) {
-    const ip = String(addr.address).toLowerCase();
-    // When forbidLoopback is set (asset download URLs from issue #5478),
-    // a DNS name that resolves to loopback is just as dangerous as a
-    // literal loopback host — reject it instead of skipping.
-    if (isLoopbackApiHost(ip)) {
-      if (options.forbidLoopback) {
-        return {
-          error: `DNS-resolved loopback address blocked (${ip})`,
-          forbidden: true,
-        };
-      }
-      continue;
-    }
-    // A resolved address the operator explicitly allowlisted (they listed the
-    // IP rather than the hostname) is permitted; everything else in private
-    // space is still blocked.
-    if (isAllowlistedInternalHost(ip, options.allowedInternalHosts)) continue;
-    if (isBlockedExternalApiHostname(ip)) {
-      return { error: 'Internal IPs blocked', forbidden: true };
-    }
   }
 
   // Attach validated addresses so the caller can pin the actual fetch to them.
@@ -300,17 +272,9 @@ export function createAssetValidatingLookup(
       family?: number,
     ) => void;
     const opts = (typeof options === 'function' ? {} : (options ?? {})) as Record<string, unknown>;
-    lookupImpl(hostname, opts as never, (err, address, family) => {
-      if (err) return cb(err);
-      const list = Array.isArray(address) ? address : [{ address, family }];
-      for (const entry of list) {
-        const addr = typeof entry === 'string' ? entry : (entry as { address: string }).address;
-        if (isLoopbackApiHost(String(addr)) || isBlockedExternalApiHostname(String(addr))) {
-          return cb(new Error(`asset host resolves to non-public address: ${addr}`));
-        }
-      }
-      return cb(null, address, family);
-    });
+    // Fork policy: local-first BYOK — loopback/private assets from a
+    // user-configured provider are valid, so the connect-time block is gone.
+    return lookupImpl(hostname, opts as never, cb as never);
   };
 }
 
@@ -363,31 +327,13 @@ export async function assertAndFetchExternalAsset(
   const check = await assertExternalAssetUrl(url, lookup);
   if (!check.ok) throw new Error(check.error);
 
-  // Determine whether the hostname is an IP literal. If so, the synchronous
-  // validation already vetted it — no DNS rebind is possible.
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(url);
-  } catch {
-    throw new Error(`invalid asset url: ${url}`);
-  }
-  const hostname = parsedUrl.hostname.toLowerCase();
-  const isIpLiteral = looksLikeIpLiteral(hostname);
+  // Fork policy: no internal/loopback space is blocked, so the unpinned-fetch
+  // refusal that used to guard the DNS-rebinding path (issue #5478) is not
+  // needed — an unresolvable hostname just fails in fetch.
 
-  // For non-IP-literal hostnames, require validated resolved addresses. If
-  // they are missing (DNS lookup failed and was caught → fail-closed in
-  // validateBaseUrlResolved), never fall back to an unpinned fetch — that
-  // would allow the attacker to rebind at fetch time (issue #5478).
-  if (!isIpLiteral && (!check.resolvedAddresses || check.resolvedAddresses.length === 0)) {
-    throw new Error('asset URL hostname was not DNS-validated — refusing unpinned fetch');
-  }
-
-  // Route through the long-lived asset dispatcher whose connection-time lookup
-  // rejects non-public addresses. The dispatcher is attached to the init object
-  // so injected fetch stubs (vi.stubGlobal) still see redirect:'error' and
-  // can ignore dispatcher, while production globalThis.fetch (Node/undici)
-  // uses it to refuse a connect-time rebind to loopback/metadata (issue #5478).
-  // Same pattern as plugins/plugin-asset-cache.ts safeExternalFetch.
+  // Route through the long-lived asset dispatcher (kept for connection-time
+  // lookup plumbing). The dispatcher is attached to the init object so
+  // injected fetch stubs (vi.stubGlobal) still see redirect:'error'.
   const requestInit: RequestInit = { ...init, redirect: 'error' };
   (requestInit as { dispatcher?: unknown }).dispatcher = assetDispatcher;
   return fetchImpl(url, requestInit);
