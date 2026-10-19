@@ -35,7 +35,6 @@ import { reportExperienceEvent } from '../observability/experience-diagnostics';
 // single source of truth for browser exception capture.
 
 import {
-  EVENT_SCHEMA_VERSION,
   type AnalyticsClientType,
 } from '@open-design/contracts/analytics';
 import { scrubExceptionList, scrubFilePath } from './scrub';
@@ -295,52 +294,11 @@ function enqueue(eventName: string, properties: Record<string, unknown>): void {
   dispatch(item);
 }
 
-function dispatch(item: BufferedSafetyEvent): void {
-  if (context == null) return;
-  const payload = {
-    api_key: context.apiKey,
-    event: item.eventName,
-    distinct_id: context.distinctId,
-    properties: {
-      ...item.body.properties,
-      // Keep the direct-fetch web safety envelope aligned with daemon and
-      // packaged-runtime telemetry. Stamp this after caller properties so a
-      // stale producer cannot accidentally override the canonical version.
-      event_schema_version: EVENT_SCHEMA_VERSION,
-      $lib: 'web/error-tracking',
-      $os: context.osName,
-      client_type: context.clientType,
-      ...(context.telemetryEnv ? { env: context.telemetryEnv } : {}),
-      ...(context.appVersion ? { app_version: context.appVersion, ui_version: context.appVersion } : {}),
-      ...(context.sessionId ? { session_id: context.sessionId } : {}),
-    },
-    timestamp: item.timestamp,
-  };
-  // `keepalive` ensures the request survives an immediate window unload —
-  // important for events that fire during navigation that are followed by
-  // a route change a millisecond later.
-  try {
-    void fetch(`${context.host.replace(/\/+$/, '')}/i/v0/e/`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-      keepalive: true,
-      // No credentials — PostHog ingest uses the public `phc_` key as the
-      // auth surface; cookies are irrelevant and sending them would just
-      // add CORS preflight friction.
-      credentials: 'omit',
-    }).catch(() => {
-      // Swallow the async rejection too. The synchronous try/catch below
-      // only guards against fetch throwing on a malformed argument; the
-      // returned promise rejects separately when the beacon can't reach
-      // PostHog (offline, ingest down). Left unhandled, that rejection is
-      // itself scooped up by the `unhandledrejection` listener above and
-      // re-reported as a `Failed to fetch` $exception — a self-amplifying
-      // loop where our own telemetry transport manufactures telemetry.
-    });
-  } catch {
-    // best-effort: safety telemetry must never propagate
-  }
+// Fork policy (local-first BYOK): the direct PostHog-ingest safety transport
+// is removed — events are dropped here, and bootstrapExceptionTracking never
+// hands this module a dispatch context.
+function dispatch(_item: BufferedSafetyEvent): void {
+  // no transport: inert.
 }
 
 // Frame-level source-map correlation.

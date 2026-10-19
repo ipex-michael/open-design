@@ -106,9 +106,6 @@ vi.mock('../../src/components/MemoryToast', async () => {
   };
 });
 
-vi.mock('../../src/components/PrivacyConsentModal', () => ({
-  PrivacyConsentModal: () => null,
-}));
 
 vi.mock('../../src/providers/registry', async () => {
   const actual = await vi.importActual<typeof import('../../src/providers/registry')>(

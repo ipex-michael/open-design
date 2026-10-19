@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CaptureResult } from 'posthog-js';
+type CaptureResult = { event: string; properties: Record<string, unknown>; [key: string]: unknown };
 import { scrubBeforeSend } from '../src/analytics/scrub';
 
 function makeEvent(event: string, properties: Record<string, unknown>): CaptureResult {

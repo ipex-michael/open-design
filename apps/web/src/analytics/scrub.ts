@@ -1,14 +1,15 @@
-// Single point of privacy scrubbing for outgoing PostHog events.
-// Wired in via posthog-js's `before_send` hook so every autocapture,
-// pageview, exception, web-vital, etc. passes through this function
-// before reaching the network. Returning null drops the event.
-//
-// The masking rules here intentionally over-redact rather than rely on
-// per-element `ph-no-capture` marks scattered across the codebase. A
-// single function is easier to audit and harder to forget when a new
-// sensitive surface ships.
+// Privacy scrubbing for captured exception frames. In this fork the PostHog
+// transport is removed; the scrubbers stay because the local observability
+// path (apps/web/src/observability) and the re-export from error-tracking.ts
+// still apply them.
 
-import type { CaptureResult } from 'posthog-js';
+// Minimal structural stand-in for the old posthog-js CaptureResult — the
+// transport is gone, this only needs to keep the shape consumers compile.
+interface CaptureResult {
+  event: string;
+  properties: Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 // Tags whose text content can carry user-typed values. PostHog autocapture
 // does not capture input/textarea `value` properties by default, but it

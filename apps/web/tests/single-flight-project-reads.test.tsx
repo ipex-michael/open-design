@@ -23,10 +23,6 @@ import { fetchProjectFiles, fetchRecentLinkedDirs } from '../src/providers/regis
 import { listConversations, loadTabs } from '../src/state/projects';
 import { CollabClient, fetchProjectCollabStatus } from '../src/collab/collab-client';
 import { useProjectWorkspaceScope } from '../src/collab/useProjectWorkspaceScope';
-import {
-  bootstrapExceptionTracking,
-  getAnalyticsClient,
-} from '../src/analytics/client';
 
 const fetchCalls: string[] = [];
 
@@ -185,20 +181,6 @@ describe('project-open single-flight reads (Batch A §4.3)', () => {
     expect(callsMatching('/projects/sf-status-poll/collab/status')).toHaveLength(2);
   });
 
-  it('shares one /analytics/config request between error tracking and analytics init', async () => {
-    const context = {
-      anonymousId: 'anon-1',
-      sessionId: 'session-1',
-      clientType: 'web',
-      locale: 'en',
-      appVersion: '0.0.0-test',
-    } as Parameters<typeof getAnalyticsClient>[0];
-    await Promise.all([
-      bootstrapExceptionTracking(context),
-      getAnalyticsClient(context),
-    ]);
-    expect(callsMatching('/analytics/config')).toHaveLength(1);
-  });
 
   it('shares one /workspace-scope request between two mounted scope consumers', async () => {
     const first = renderHook(() => useProjectWorkspaceScope('sf-scope'));

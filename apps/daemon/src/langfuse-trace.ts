@@ -32,8 +32,7 @@ import {
 } from '@open-design/contracts';
 
 import type { TelemetryPrefs } from './app-config.js';
-import { normalizeOpenDesignTelemetryRelayUrl } from './integrations/telemetry-relay.js';
-import { readVelaControlApiContext } from './integrations/vela.js';
+import { readAppConfig } from './app-config.js';
 import {
   deriveRunTelemetryExportExpectation,
   exportRunObservation,
@@ -62,12 +61,6 @@ import type { RunFailureClassification } from './run-failure-classification.js';
 import { redactSecrets } from './redact.js';
 import { readTelemetryEnvironment } from './telemetry-environment.js';
 
-// Langfuse US region: confirmed by an end-to-end smoke on 2026-05-07 — the
-// project's keys authenticate against `us.cloud.langfuse.com` only. EU host
-// (`cloud.langfuse.com`) returns 401 with the matching error message.
-// See specs/change/20260507-langfuse-telemetry/spec.md Q3.
-const DEFAULT_BASE_URL = 'https://us.cloud.langfuse.com';
-
 export const INPUT_MAX_BYTES = 64 * 1024;
 const OUTPUT_MAX_BYTES = 64 * 1024;
 const TOOL_INPUT_MAX_BYTES = 8 * 1024;
@@ -75,8 +68,6 @@ const TOOL_OUTPUT_MAX_BYTES = 8 * 1024;
 const ARTIFACTS_MAX_ITEMS = 50;
 const SESSION_ID_MAX = 200; // Langfuse drops sessionIds longer than this.
 export const HARD_BATCH_MAX_BYTES = 1024 * 1024;
-const DEFAULT_FETCH_TIMEOUT_MS = 20_000;
-const DEFAULT_FETCH_RETRIES = 1;
 const PROMPT_STACK_BLAME_MAX_SECTIONS = 8;
 let missingTelemetrySinkWarned = false;
 
@@ -431,28 +422,13 @@ export interface FeedbackReportContext {
   metadata?: Record<string, unknown>;
 }
 
+// Fork policy (local-first BYOK): telemetry removed. Every Langfuse/relay/Vela
+// sink read reports unconfigured, so all trace/score export paths above these
+// functions stay inert while payload-building code remains untouched.
 export function readLangfuseConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  _env: NodeJS.ProcessEnv = process.env,
 ): LangfuseConfig | null {
-  const publicKey = env.LANGFUSE_PUBLIC_KEY?.trim();
-  const secretKey = env.LANGFUSE_SECRET_KEY?.trim();
-  if (!publicKey || !secretKey) return null;
-  const baseUrl = (env.LANGFUSE_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(
-    /\/+$/,
-    '',
-  );
-  const authHeader =
-    'Basic ' +
-    Buffer.from(`${publicKey}:${secretKey}`, 'utf8').toString('base64');
-  return {
-    authHeader,
-    baseUrl,
-    timeoutMs: parsePositiveInt(
-      env.LANGFUSE_TIMEOUT_MS,
-      DEFAULT_FETCH_TIMEOUT_MS,
-    ),
-    retries: parseNonNegativeInt(env.LANGFUSE_RETRIES, DEFAULT_FETCH_RETRIES),
-  };
+  return null;
 }
 
 /**
@@ -460,26 +436,9 @@ export function readLangfuseConfig(
  * direct Langfuse credentials second for local smoke tests, disabled last.
  */
 export function readTelemetrySinkConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  _env: NodeJS.ProcessEnv = process.env,
 ): TelemetrySinkConfig | null {
-  const relayUrl = env.OPEN_DESIGN_TELEMETRY_RELAY_URL?.trim();
-  if (relayUrl) {
-    return {
-      kind: 'relay',
-      relayUrl: normalizeOpenDesignTelemetryRelayUrl(relayUrl),
-      timeoutMs: parsePositiveInt(
-        env.OPEN_DESIGN_TELEMETRY_TIMEOUT_MS ?? env.LANGFUSE_TIMEOUT_MS,
-        DEFAULT_FETCH_TIMEOUT_MS,
-      ),
-      retries: parseNonNegativeInt(
-        env.OPEN_DESIGN_TELEMETRY_RETRIES ?? env.LANGFUSE_RETRIES,
-        DEFAULT_FETCH_RETRIES,
-      ),
-    };
-  }
-
-  const config = readLangfuseConfig(env);
-  return config == null ? null : { kind: 'langfuse', ...config };
+  return null;
 }
 
 /**
@@ -494,11 +453,6 @@ export function readTaskTelemetrySinkConfig(
   return readTelemetrySinkConfig(env);
 }
 
-function isVelaTelemetryEnabled(env: NodeJS.ProcessEnv): boolean {
-  const raw = env.OPEN_DESIGN_VELA_TELEMETRY?.trim().toLowerCase();
-  return raw !== '0' && raw !== 'false' && raw !== 'off' && raw !== 'no';
-}
-
 /**
  * Completed-run and feedback telemetry share the same sink selection: Vela when
  * a Control Key is present, otherwise the anonymous relay / direct Langfuse.
@@ -506,32 +460,10 @@ function isVelaTelemetryEnabled(env: NodeJS.ProcessEnv): boolean {
  * re-scopes it with the same account hash as the original run batch.
  */
 export function readRunTelemetrySinkConfig(
-  env: NodeJS.ProcessEnv = process.env,
-  configuredEnv: Record<string, string> = {},
+  _env: NodeJS.ProcessEnv = process.env,
+  _configuredEnv: Record<string, string> = {},
 ): RunTelemetrySinkConfig | null {
-  if (isVelaTelemetryEnabled(env)) {
-    const context = readVelaControlApiContext(env, configuredEnv);
-    const controlKey = context?.controlKey?.trim() ?? '';
-    if (context && controlKey) {
-      return {
-        kind: 'vela',
-        apiUrl: (context.apiUrl.trim() || 'https://amr-api.open-design.ai').replace(
-          /\/+$/,
-          '',
-        ),
-        controlKey,
-        timeoutMs: parsePositiveInt(
-          env.OPEN_DESIGN_TELEMETRY_TIMEOUT_MS ?? env.LANGFUSE_TIMEOUT_MS,
-          DEFAULT_FETCH_TIMEOUT_MS,
-        ),
-        retries: parseNonNegativeInt(
-          env.OPEN_DESIGN_TELEMETRY_RETRIES ?? env.LANGFUSE_RETRIES,
-          DEFAULT_FETCH_RETRIES,
-        ),
-      };
-    }
-  }
-  return readTelemetrySinkConfig(env);
+  return null;
 }
 
 /**
@@ -598,18 +530,6 @@ export function deriveLangfuseDeliveryState(
     langfuse_expected: true,
     langfuse_delivery_status: 'queued',
   };
-}
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (value === undefined) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function parseNonNegativeInt(value: string | undefined, fallback: number): number {
-  if (value === undefined) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 // Byte-aware UTF-8 truncation. JS String.length counts UTF-16 code units,

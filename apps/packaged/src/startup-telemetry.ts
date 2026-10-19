@@ -1,95 +1,17 @@
-// Main-process direct PostHog capture for daemon/web STARTUP failures.
+// Packaged main-process startup-failure reporting.
 //
-// Why this exists separately from apps/daemon/src/analytics.ts: the daemon is
-// the PostHog client's host. When the daemon never reports status (e.g. a
-// missing native module — see issue #4638, where `better-sqlite3` vanished
-// from the app bundle and the daemon died with ERR_MODULE_NOT_FOUND), the
-// daemon/web sidecars are not running, so NOTHING emits telemetry and the
-// whole "startup failed before the daemon came up" class is invisible on every
-// dashboard. This module lets the packaged MAIN process emit one structured
-// event on the fatal-exit path.
-//
-// ZERO startup side-effects by construction:
-//  - No work at import time (pure helpers + one async fn; no client, no I/O).
-//  - Invoked ONLY from index.ts's `main().catch(...)`, i.e. only when startup
-//    has ALREADY failed and the process is about to exit(1). The happy path
-//    never touches any of this.
-//  - capture() is fetch-based (no posthog-node SDK, no new dependency), wrapped
-//    in Promise.race with a hard timeout, and swallows every error — it can
-//    neither block nor crash the exit.
-//
-// Consent: startup-crash telemetry follows the existing `captureSafety` policy
-// in apps/daemon/src/analytics.ts — stability data is retained even for
-// opted-out users (and the main process cannot read daemon consent anyway,
-// since the daemon isn't up). The Settings → Privacy copy MUST call this out.
-//
-// Payload PII: the free-form crash fields (error_message, error_stack) and every
-// path we send (log_path, native_module_path) run through `scrubUserPaths` to
-// strip the user's home dir, and the free-form text is length-capped. Startup
-// errors are module-resolution / daemon-exit messages, not user content, so this
-// bounds the exposure to build/OS strings rather than anything the user typed.
+// Fork policy (local-first BYOK): telemetry removed — captureStartupFailure
+// is a no-op, so this module classifies the failure locally and never sends
+// anything off-box. The classification/parsing helpers are kept because the
+// fatal-exit path and its tests consume them.
 
 import { readFile } from "node:fs/promises";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { release } from "node:os";
 
-const DEFAULT_HOST = "https://us.i.posthog.com";
-// Real-machine e2e (local packaged build → delete better-sqlite3 → launch →
-// query PostHog) proved a 1.5s cap silently DROPPED the event: a cold DNS+TLS
-// handshake to us.i.posthog.com from a fresh main process exceeds 1.5s, so the
-// race timed out and process.exit(1) killed the in-flight POST before it
-// landed. 5s gives the one request room to complete on a cold connection.
-// A genuinely offline machine still exits fast — fetch rejects on DNS failure,
-// so `send` resolves early and we don't burn the full bound; only a black-hole
-// network pays the full 5s, which on an already-crashing exit is acceptable.
-const DEFAULT_TIMEOUT_MS = 5000;
 const LOG_TAIL_MAX_BYTES = 16_384;
 
 export const STARTUP_FAILURE_EVENT = "packaged_runtime_failed";
-
-// Shared safety-event envelope constants. `captureSafety` in
-// apps/daemon/src/analytics.ts stamps these on every stability event; we mirror
-// them here so env/schema-filtered dashboards bucket packaged_runtime_failed
-// beside the rest of the analytics stream instead of dropping it.
-//
-// EVENT_SCHEMA_VERSION must stay in lockstep with
-// packages/contracts/src/analytics/public-params.ts. It is replicated (not
-// imported) because apps/packaged does not depend on @open-design/contracts and
-// a single integer isn't worth a new cross-package dependency that also
-// complicates the daemon-chunk externalization.
-const EVENT_SCHEMA_VERSION = 2;
-const CLIENT_TYPE = "packaged_main";
-const CAPTURE_SOURCE = "packaged/startup";
-
-// Resolve the same `env` bucket as the daemon events this main process's own
-// sidecars emit. The daemon child is ALWAYS spawned with NODE_ENV=production
-// (see spawnSidecarChild in sidecars.ts), so daemon/web events report
-// `production` — but the packaged MAIN process's own NODE_ENV is unset, so the
-// old `development` default mislabeled every packaged_runtime_failed as dev
-// (100% 'development' in prod), hiding real startup crashes from the
-// env=production dashboards. apps/packaged only ever runs as a packaged build,
-// so an unset NODE_ENV here means packaged production, not dev; treat anything
-// that isn't an explicit development marker as production so the two sides
-// match. Explicit overrides (OD_TELEMETRY_ENV / OPEN_DESIGN_ENV / POSTHOG_ENV /
-// LANGFUSE_ENVIRONMENT) still win for anyone who needs to force a bucket
-// (e.g. a maintainer smoke-testing a local packaged build).
-function resolveTelemetryEnv(env: NodeJS.ProcessEnv = process.env): string {
-  const explicit =
-    env.OD_TELEMETRY_ENV?.trim() ||
-    env.OPEN_DESIGN_ENV?.trim() ||
-    env.POSTHOG_ENV?.trim() ||
-    env.LANGFUSE_ENVIRONMENT?.trim();
-  if (explicit) return explicit;
-  if (env.NODE_ENV === "development") return "development";
-  return "production";
-}
-
-// Mirrors apps/daemon/src/analytics.ts randomInsertId. $insert_id is PostHog's
-// dedup key; event_id carries the same value.
-function randomInsertId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
 
 export type StartupFailureKind =
   | "daemon-start"
@@ -290,13 +212,6 @@ export function scrubUserPaths(value: string): string {
     .replace(/\/(Users|home)\/[^/\s]+/g, "/$1/<redacted>");
 }
 
-function osName(platform: NodeJS.Platform = process.platform): string {
-  if (platform === "darwin") return "Mac OS X";
-  if (platform === "win32") return "Windows";
-  if (platform === "linux") return "Linux";
-  return platform;
-}
-
 // Stable-ish distinct id for the crash event. Best-effort reads the persistent
 // installationId (survives a namespace data reset); falls back to a synthetic
 // per-namespace id. Person identity is not critical for crash-distribution
@@ -365,69 +280,20 @@ export interface CaptureDeps {
   insertId?: string;
 }
 
-// Fire a single PostHog capture over plain HTTPS. No-op without a key; never
-// throws; never blocks longer than `timeoutMs`.
+// Fork policy (local-first BYOK): the direct PostHog startup-crash transport
+// is removed — capture is always a no-op, so reportStartupFailure builds a
+// payload locally and never sends it.
 export async function captureStartupFailure(
-  args: {
+  _args: {
     posthogKey: string | null;
     posthogHost: string | null;
     distinctId: string;
     event: string;
     properties: Record<string, unknown>;
   },
-  deps: CaptureDeps = {},
+  _deps: CaptureDeps = {},
 ): Promise<void> {
-  const key = args.posthogKey?.trim();
-  if (!key) return; // fork builds / no key → no-op, zero network
-  const host = (args.posthogHost?.trim() || DEFAULT_HOST).replace(/\/+$/, "");
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const now = deps.now ?? (() => new Date().toISOString());
-  const insertId = deps.insertId ?? randomInsertId();
-  const appVersion =
-    typeof args.properties.app_version === "string" ? args.properties.app_version : null;
-  const body = JSON.stringify({
-    api_key: key,
-    event: args.event,
-    distinct_id: args.distinctId,
-    properties: {
-      ...args.properties,
-      // Shared safety-event envelope, mirroring captureSafety in
-      // apps/daemon/src/analytics.ts. posthog-node-style manual enrichment:
-      // the SDK auto-fills $os/$insert_id for posthog-js but not for server
-      // emits, and dashboards filter on env / event_schema_version.
-      event_id: insertId,
-      event_schema_version: EVENT_SCHEMA_VERSION,
-      env: resolveTelemetryEnv(),
-      device_id: args.distinctId,
-      client_type: CLIENT_TYPE,
-      capture_source: CAPTURE_SOURCE,
-      ui_version: appVersion,
-      $os: osName(),
-      $os_version: release(),
-      $insert_id: insertId,
-    },
-    timestamp: now(),
-  });
-
-  const send = (async () => {
-    try {
-      await fetchImpl(`${host}/capture/`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body,
-      });
-    } catch {
-      // analytics failure must never look like a product error
-    }
-  })();
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, timeoutMs);
-  });
-  await Promise.race([send, timeout]);
-  if (timer) clearTimeout(timer);
+  return;
 }
 
 export interface ReportStartupFailureArgs {

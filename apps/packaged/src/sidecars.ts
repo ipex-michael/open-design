@@ -693,9 +693,9 @@ export function buildPackagedDaemonSpawnEnv(
       ? {}
       : { OD_MCP_BOOTSTRAP_ARGS: JSON.stringify(options.mcpBootstrapArgs) }),
     ...pickPackagedDesktopHandoffEnv(options.desktopHandoffEnv ?? {}),
-    ...(options.telemetryRelayUrl == null || options.telemetryRelayUrl.length === 0
-      ? {}
-      : { OPEN_DESIGN_TELEMETRY_RELAY_URL: options.telemetryRelayUrl }),
+    // Fork policy (local-first BYOK): telemetry removed — the baked
+    // telemetryRelayUrl / posthogKey / posthogHost options are ignored and
+    // never enter the daemon environment.
     // OD_LEGACY_DATA_DIR is the one-shot recovery handle for users
     // upgrading from 0.3.x .od/ layouts. The daemon's startup
     // migrator (legacy-data-migrator.ts) reads it; the env-allowlist
@@ -705,17 +705,6 @@ export function buildPackagedDaemonSpawnEnv(
     ...(options.legacyDataDir == null || options.legacyDataDir.length === 0
       ? {}
       : { OD_LEGACY_DATA_DIR: options.legacyDataDir }),
-    // PostHog analytics ingest key, baked into the bundle at packaging time
-    // by tools/pack. Daemon reads this as POSTHOG_KEY at startup. Absent
-    // for fork builds without the CI secret — the daemon's analytics
-    // module no-ops cleanly in that case, and /api/analytics/config
-    // returns enabled=false regardless of user consent.
-    ...(options.posthogKey == null || options.posthogKey.length === 0
-      ? {}
-      : { POSTHOG_KEY: options.posthogKey }),
-    ...(options.posthogHost == null || options.posthogHost.length === 0
-      ? {}
-      : { POSTHOG_HOST: options.posthogHost }),
   };
 }
 
